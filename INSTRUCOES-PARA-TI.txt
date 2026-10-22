@@ -1,0 +1,241 @@
+INSTRUÇÕES PARA TI — AGENDA E MAPA PROGRAMÁTICO
+Entrega: 22/10/2026. Sem indicação de fornecedor de hospedagem.
+
+1. O QUE ESTÁ SENDO ENTREGUE
+
+Dois projetos independentes, um por repositório: agenda e mapa programático.
+O código inclui login Google, restrição aos oito domínios institucionais, login
+integrado, saída conjunta, carregamento circular e reconhecimento de um novo
+login no outro site ao recarregar a antiga tela de login.
+
+Os ZIPs contêm código, marcas, fontes e testes. Não contêm client_secret,
+segredo SSO de produção, sessões, dependências instaladas, histórico Git nem backup do banco
+em produção. Há conteúdo institucional no código e dados iniciais no mapa.
+Criar preferencialmente repositórios PRIVADOS. Extrair cada ZIP e enviar o
+conteúdo da pasta do projeto, incluindo arquivos ocultos, à raiz do repositório.
+
+2. DEFINIR A HOSPEDAGEM ANTES DA PUBLICAÇÃO
+
+O GitHub guarda o código; GitHub Pages ou publicação de HTML estático não
+executam o backend necessário. Não é possível garantir execução em qualquer
+servidor apenas enviando estes arquivos.
+
+A agenda usa React/Vinext, um servidor no modelo Worker com entrada fetch e
+um banco SQL com a interface D1 (binding DB). O mapa usa um Worker ESM com
+entrada fetch e armazenamento de objetos com a interface R2 (binding BUCKET).
+Esses nomes descrevem as interfaces usadas pelo código atual, não uma escolha
+de fornecedor para esta entrega. A TI deve avaliar o ambiente escolhido e
+preservar essas interfaces ou implementar adaptadores e testar o resultado.
+
+Um servidor Node comum não fornece automaticamente os bindings DB/BUCKET nem
+o módulo cloudflare:workers importado pela agenda. Para outro runtime, adaptar
+a entrada HTTP, o acesso às variáveis, o banco e o armazenamento. Servir só
+site/index.html do mapa elimina a proteção e a persistência do backend.
+
+Requisitos que precisam continuar funcionando:
+- HTTPS nos dois sites, cada um em uma origem própria, sem subcaminho de base.
+- Banco persistente da agenda e armazenamento persistente do mapa, com backup.
+- Transações e consumo atômico das tentativas de login, sem reutilização.
+- Escrita condicional por versão/ETag no mapa, inclusive criação inicial;
+  não substituir por leitura seguida de gravação sem proteção de concorrência.
+- Saída HTTPS do servidor para os endpoints OAuth e chaves públicas do Google.
+- Segredos acessíveis somente no servidor, configurados no ambiente de execução.
+- Relógios dos servidores sincronizados e preservação de cookies e cabeçalhos.
+
+3. ENDEREÇOS E VARIÁVEIS DE CADA SITE
+
+Os endereços abaixo são EXEMPLOS, não domínios já registrados ou configurados:
+AGENDA = https://agenda.exemplo.org
+MAPA   = https://mapa.exemplo.org
+
+Não incluir barra final, caminho, parâmetros ou fragmento nas variáveis de origem.
+Configurar no servidor de cada aplicação:
+
+Variável                  | Agenda                 | Mapa
+SITE_AUTH_MODE            | oauth                  | oauth
+SITE_ORIGIN               | URL HTTPS da agenda    | não usada
+MAP_ORIGIN                | não usada              | URL HTTPS do mapa
+SSO_PEER_ORIGIN           | URL HTTPS do mapa      | URL HTTPS da agenda
+SSO_SHARED_SECRET         | segredo protegido S    | exatamente o mesmo S
+SSO_AUTO_LOGIN            | false, depois true     | false, depois true
+GOOGLE_CLIENT_ID          | cliente Google Web     | mesmo cliente Google Web
+GOOGLE_CLIENT_SECRET      | segredo desse cliente  | segredo desse cliente
+AUTH_ALLOWED_DOMAINS      | lista abaixo           | mesma lista
+BOOTSTRAP_ADMIN_EMAILS    | admins iniciais        | não usada
+MAP_ADMIN_EMAILS          | não usada              | admins do mapa
+AUTH_ALLOWED_EMAILS       | vazio                  | não usada
+INCLUDE_DEMO_EVENTS       | false                  | não usada
+EMAIL_WEBHOOK_URL         | opcional               | não usada
+EMAIL_WEBHOOK_SECRET      | secreto, se houver     | não usada
+
+AUTH_ALLOWED_DOMAINS, sem @ e separado por vírgulas:
+fundacaolemann.org.br,megaedu.org.br,motriz.org,abemcomum.org,novaescola.org.br,institutoreuna.org.br,institutotrajetorias.org.br,centrolemann.org.br
+
+motriz.org.br NÃO está autorizado. Não usar correspondência parcial de domínio.
+O servidor verifica e-mail confirmado e domínio institucional hd no token Google.
+Definir os administradores com o responsável pelos sites. A administração é
+independente em cada aplicação; login integrado não concede papel de administrador.
+
+Gerar um NOVO SSO_SHARED_SECRET de pelo menos 32 bytes aleatórios, codificado
+em base64url, e configurá-lo com o mesmo valor nas duas aplicações. Nunca
+colocar esse valor em arquivos versionados, front-end, logs ou neste guia.
+O mapa preserva um diálogo legado de senha para a cópia offline. Essa senha
+visível no código não protege o site hospedado: a autorização em produção é
+conferida no servidor pelo login e por MAP_ADMIN_EMAILS. Não reutilizar o valor
+local como credencial de produção.
+
+O compartilhamento do cliente Google, sozinho, não integra as sessões.
+A integração depende também do segredo SSO, das origens cruzadas e das rotas.
+
+Credenciais Google e de infraestrutura devem ser entregues por canal protegido
+à TI ou configuradas pelo titular. Os campos vazios de .env.example são apenas
+um modelo; não são credenciais prontas. O JSON baixado do Google não deve ir
+para o GitHub. Não colocar segredos em variáveis públicas do front-end.
+
+4. CONFIGURAR O GOOGLE
+
+Para manter o desenho atual, usar o mesmo cliente OAuth do tipo Web nos dois
+sites. É possível manter o cliente existente, desde que seu responsável inclua
+as duas novas URIs de retorno EXATAS:
+
+https://agenda.exemplo.org/auth/callback/google
+https://mapa.exemplo.org/auth/callback/google
+
+Substituir os exemplos pelos endereços finais. Os escopos usados são apenas
+openid email profile. Não é necessário acesso a Drive, Planilhas ou Gmail para
+o login. Não substituir estas URIs por /login ou pelo callback SSO.
+
+Confirmar no Google o público e o status do aplicativo. Se estiver em Testando,
+as limitações/lista de usuários de teste podem impedir entrada. Como os sites
+atendem várias organizações, não limitar inadvertidamente o aplicativo à
+organização interna de uma só delas. Resolver publicação, domínios autorizados,
+marca e informações institucionais pelo fluxo de administração do Google.
+Manter as URIs antigas enquanto a instalação atual ainda precisar funcionar;
+removê-las somente após o encerramento planejado da migração.
+
+5. ROTAS, COOKIES E INTEGRAÇÃO
+
+Preservar /login, /auth/start/google, /auth/callback/google, /auth/logout,
+/auth/sso/start, /auth/sso/authorize, /auth/sso/callback,
+/auth/sso/complete e /api/session. Preservar também as APIs de negócio.
+
+Não trocar POST por GET, não bloquear o POST JSON de /auth/sso/complete e não
+reescrever as rotas de autenticação para uma página estática de SPA. Proxies
+devem conservar host/protocolo externo, Origin, Set-Cookie, Location, CSP e
+Cache-Control. Não armazenar em cache login, callbacks, respostas de sessão
+ou dados autenticados. Não registrar códigos OAuth, tokens ou cookies em logs.
+
+Cookies de sessão são por site, HttpOnly e Secure. O SSO ocorre por navegação
+entre as origens e validação assinada; não é necessário liberar CORS amplo,
+colocar segredo no navegador ou compartilhar cookies no domínio pai.
+Não substituir o consumo atômico de state/nonce por armazenamento em memória
+de uma instância: deve funcionar com várias instâncias concorrentes.
+
+Ao sair de A: A encerra sua sessão, visita a saída de B e volta ao login de A.
+O parâmetro sso=skip impede reconexão nessa chegada e é removido da URL; ao
+recarregar depois, a consulta SSO pode ocorrer de novo. Preservar essa lógica.
+Abas abertas conferem a sessão ao ganhar foco/visibilidade e periodicamente
+quando visíveis. A saída vale para este navegador, não encerra a conta Google
+nem sessões em outros dispositivos. O parceiro precisa estar acessível para
+concluir a saída conjunta.
+
+6. BANCO E DADOS NA MUDANÇA DE AMBIENTE
+
+Os ZIPs não são backup dos registros atuais em produção.
+
+Agenda: database/schema.sql é a estrutura atual para um banco NOVO e VAZIO,
+em dialeto SQLite, sem registros e sem sessões. Não aplicar esse arquivo em um
+banco existente. drizzle/ mantém o histórico original de migrações; a migração
+0007 contém registros institucionais históricos e 0008 atualiza proprietário.
+Não executar automaticamente esse histórico depois da estrutura consolidada.
+Em outro banco SQL, adaptar o dialeto e as operações do Drizzle, preservando
+índices, gatilhos, regras de inscrição e atomicidade.
+
+Para levar os dados atuais, providenciar exportação controlada na origem,
+importar eventos, inscrições e rascunhos e conferir totais, relacionamentos e
+proprietários por e-mail. Revisar permissões em app_user_roles. Não importar
+oauth_sessions ou oauth_states: todos devem entrar novamente no novo endereço.
+Preservar IDs de eventos para manter as inscrições relacionadas corretamente.
+Os arquivos SQL históricos no código não substituem essa exportação atual.
+
+Mapa: o código traz um conjunto inicial de dados; mudanças salvas em produção
+ficam no objeto mapa-ecossistema/current.json e não acompanham o Git por si só.
+Migrar esse objeto com validação ou republicar a versão de dados aprovada pelo
+fluxo administrativo existente. Não importar os objetos de auth/ (sessões e
+tentativas). Em caso de fonte Google Sheets, o fluxo atual aceita o arquivo
+exportado no formato de planilha já suportado; não há sincronização automática
+com Google Sheets implementada por este pacote.
+
+Definir backup, recuperação e retenção para banco e objetos. Limpeza de objetos
+temporários deve atingir apenas auth/, preservando mapa-ecossistema/current.json.
+Na agenda, configurar e testar o webhook de e-mail se confirmação por e-mail
+for necessária; login Google não habilita envio de e-mail automaticamente.
+
+7. CONSTRUIR E VALIDAR
+
+Agenda: usar Node compatível com engines e a versão de pnpm de package.json.
+Executar na raiz do repositório:
+  pnpm install --frozen-lockfile
+  pnpm test
+  pnpm exec tsc --noEmit --incremental false
+  pnpm run build
+
+O build atual gera dist/server e dist/client. O runtime e os bindings de produção
+devem ser configurados pela TI; o arquivo gerado com binding local fictício não
+é configuração pronta do banco de produção. pnpm start é prévia local.
+
+Mapa: não requer instalação de dependências para construir:
+  node scripts/build.mjs
+  node scripts/validate-artifact.mjs
+  node tests/google-auth.mjs
+  node tests/sso.mjs
+  node tests/shared.mjs
+
+Saída: dist/server/index.js. Para testes de dados, executar também
+node tests/audit.cjs e os testes Python. Em Windows, PYTHON pode apontar para
+o executável Python e PYTHONUTF8=1 evita problemas de codificação.
+Não usar o HTML isolado como substituto do servidor do mapa.
+
+8. ORDEM DE ENTRADA EM PRODUÇÃO
+
+1) Definir as duas URLs finais e preparar banco/armazenamento, backups e segredos.
+2) Configurar Google, administradores e restrição aos mesmos oito domínios.
+3) Publicar os dois backends com SSO_AUTO_LOGIN=false e testar login Google
+   individual em cada um, acesso administrativo e persistência dos dados.
+4) Conferir SSO_SHARED_SECRET igual e SSO_PEER_ORIGIN cruzado corretamente.
+5) Ativar SSO_AUTO_LOGIN=true em AMBOS, sem trocar o segredo entre publicações.
+6) Executar os testes de aceitação abaixo antes de transferir o tráfego.
+
+O novo ambiente não herda automaticamente o bloqueio de público da hospedagem
+antiga. A TI deve aplicar a política de acesso aprovada e confirmar que todo
+conteúdo protegido continua atrás da autenticação. Se houver um bloqueio
+adicional da infraestrutura, ele deve permitir o mesmo público nos dois sites.
+
+9. TESTES DE ACEITAÇÃO OBRIGATÓRIOS
+
+- Sem sessão, abrir ambos: login normal, sem ciclo infinito.
+- Entrar na agenda e abrir o mapa: entrar sem novo login Google; repetir inverso.
+- Sair pela agenda e confirmar sessão inválida nos dois; repetir saindo pelo mapa.
+- Entrar, sair, entrar no outro site e recarregar a antiga tela de login:
+  ela deve abrir conectada, sem editar /login?sso=skip. Repetir inverso.
+- Conta autorizada sem papel administrativo: consultar, sem controles ou escrita
+  administrativos. No mapa, não mostrar Dados do mapa nem atualização da planilha.
+- Conta fora da lista: rejeitar, inclusive se vier por SSO. Testar motriz.org.br.
+- Confirmar o círculo de carregamento e as telas sem rolagem indevida.
+- Criar/editar um registro de teste autorizado, recarregar e confirmar persistência;
+  testar inscrições da agenda e atualizações concorrentes no mapa.
+- Testar expiração de sessão, rejeição de tentativa SSO reutilizada e indisponibilidade
+  do parceiro sem abrir acesso indevido.
+- Validar em navegadores usados pelas organizações e no endereço HTTPS definitivo.
+
+10. RESPONSABILIDADE E LIMITES DESTA ENTREGA
+
+As correções de login, saída conjunta e recarregamento foram verificadas nos sites
+atuais. Estes ZIPs ainda não foram implantados no ambiente que a TI escolherá.
+Nenhuma credencial, recurso externo ou DNS de nova hospedagem foi configurado.
+Adaptar o backend a outro runtime exige nova validação; não tratar o build atual
+como garantia de compatibilidade universal. Manter a versão anterior disponível
+para reversão durante a migração, sem misturar bancos de teste e produção.
+
+Referência do protocolo Google (URIs exatas e validação do token):
+https://developers.google.com/identity/openid-connect/openid-connect
