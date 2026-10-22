@@ -1,0 +1,10 @@
+{
+  "site": "Mapa de Atuação Programático",
+  "data": "2026-10-22",
+  "source_commit": "01707ea4adf937649335472cbc2bd517530fed2b",
+  "includes_production_backup": false,
+  "includes_credentials": false,
+  "hosting_provider_selected": false,
+  "source_cleanup": "Remoção de componentes sem referência e arquivos redundantes; comportamento da aplicação preservado.",
+  "removed_unused_files": 2
+}

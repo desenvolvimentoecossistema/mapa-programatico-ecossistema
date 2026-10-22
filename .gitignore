@@ -1,0 +1,18 @@
+dist/
+site.tar.gz
+node_modules/
+.sites-runtime/
+.wrangler/
+.env*
+!.env.example
+
+# Segredos e arquivos locais
+.dev.vars*
+!.env.example
+*.tsbuildinfo
+*.zip
+*.tar
+*.tar.gz
+
+# Bundle gerado a partir dos fontes
+/worker/index.js
