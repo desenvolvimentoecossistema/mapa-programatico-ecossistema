@@ -20,6 +20,7 @@ const authentication=await readFile(root+'server/google-auth.js','utf8');
 const ssoCore=await readFile(root+'server/sso-core.js','utf8');
 const sso=await readFile(root+'server/sso.js','utf8');
 const verifier=await readFile(root+'server/google-token.js','utf8');
+const sheets=await readFile(root+'server/google-sheets.js','utf8');
 const login=await readFile(root+'site/login.html','utf8');
 const lines=[
   '// Generated from site/index.html and server/handler.js by scripts/prepare-worker.mjs.',
@@ -30,7 +31,7 @@ const lines=[
   'const INITIAL_SNAPSHOT='+JSON.stringify(snapshot)+';',
   'const MAP_EXT=INITIAL_SNAPSHOT.ext, EXT_COLORS=INITIAL_SNAPSHOT.colors, MAP_ORGS_EXTRA=INITIAL_SNAPSHOT.extra;',
   'const LOGIN_PAGE='+JSON.stringify(login)+';',
-  validator,verifier,authentication,ssoCore,sso,handler
+  validator,verifier,authentication,ssoCore,sso,sheets,handler
 ];
 await mkdir(root+'worker',{recursive:true});
 await writeFile(root+'worker/index.js',lines.join('\n'));
