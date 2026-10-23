@@ -1,9 +1,9 @@
 {
   "site": "Mapa de Atuação Programático",
   "data": "2026-10-23",
-  "source_commit": "08ce4a78c93f67508ac03485310f18cc91fa5d03",
+  "source_commit": "b479fe0e87dd625d3242eb2bcd56550b58c95a64",
   "includes_production_backup": false,
   "includes_credentials": false,
   "hosting_provider_selected": false,
-  "source_cleanup": "Atualização dos dados por Google Sheets com prévia e publicação administrativa."
+  "source_cleanup": "Atualização pelo Google Sheets com prévia, publicação administrativa e controles alinhados à direita."
 }
