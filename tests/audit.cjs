@@ -80,6 +80,9 @@ assert.equal(run('Object.values(DIMENSIONS).reduce((n,p)=>n+Object.keys(p).lengt
 
 console.log('Programs by tab:',run('JSON.stringify({educacao:tabCount("educacao"),liderancas:tabCount("liderancas")})'));
 
+assert.equal(run('tabCount("educacao")'),27);
+assert.equal(run('tabCount("liderancas")'),15);
+
 assert.equal(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).length'),run('tabCount("educacao")'));
 
 // Reproduce the reported selection through the same checkbox change handlers as the UI.
@@ -93,14 +96,22 @@ const chooseOnly=(key,value)=>{
 chooseOnly('niveis','Alfabetização');
 assert.equal(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).length'),13);
 assert(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).every(e=>e.d.segmento_niveis.includes("Alfabetização"))'));
+assert.deepEqual(JSON.parse(run('JSON.stringify(progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)&&e.orgs.includes("cls")).map(e=>e.name))')),['Programa Internacional (South-South)']);
 assert(!document.getElementById('programs-grid').innerHTML.includes('<h3>Conectividade</h3>'));
-chooseOnly('niveis','Sem nível informado');
+chooseOnly('niveis','Geral');
 assert.equal(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).length'),7);
 assert(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).every(e=>e.d.segmento_niveis.length===0)'));
-assert(document.getElementById('programs-grid').innerHTML.includes('Sem nível informado'));
+assert.equal(run('progGroup("niveis").optionValues.at(-1)'),'Geral');
+assert(document.getElementById('programs-grid').innerHTML.includes('>Geral</span>'));
 chooseOnly('org','MegaEdu');
 assert.equal(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).length'),2);
 assert(run('progGroup("niveis").state.has(SEM_NIVEL)'));
+document.getElementById('programs-select-all').click();
+assert.equal(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).length'),27);
+const generalCheckbox=filterPanel.querySelectorAll('input').find(el=>el.dataset.focusKey===JSON.stringify(['niveis','Geral']));
+generalCheckbox.checked=false;generalCheckbox.events.change[0]();
+assert.equal(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).length'),20);
+assert(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).every(e=>e.d.segmento_niveis.length>0)'));
 document.getElementById('programs-select-all').click();
 assert.equal(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).length'),27);
 document.getElementById('programs-reset').click();
