@@ -75,7 +75,7 @@
 
   .l2-view { display: none; height: calc(100vh - 106px); }
 
-  /* ---------- Data toolbar (spreadsheet upload) ---------- */
+  /* ---------- Data toolbar (Google Sheets) ---------- */
   .data-toolbar {
     display: flex; align-items: center; gap: 10px;
     padding: 8px 24px;
@@ -365,9 +365,10 @@
   </div>
   <div class="data-toolbar-right">
     <span class="data-toolbar-label" id="data-management-label" hidden>Dados do mapa:</span>
-    <button type="button" class="data-toolbar-btn" id="data-upload-btn">📤 Atualizar via planilha</button>
+    <button type="button" class="data-toolbar-btn" id="data-upload-btn" hidden>Atualizar do Google Sheets</button>
+    <button type="button" class="data-toolbar-btn" id="data-confirm-btn" hidden>Publicar atualização</button>
+    <a class="data-toolbar-btn" id="data-source-link" target="_blank" rel="noopener noreferrer" hidden>Abrir fonte</a>
     <button type="button" class="data-toolbar-btn" id="data-reset-btn" hidden>↩ Voltar aos dados publicados</button>
-    <input type="file" id="data-upload-input" accept=".xlsx,.xls" style="display:none">
     <span id="data-status" hidden class="data-toolbar-status" role="status" aria-live="polite"></span>
   </div>
 </div>
@@ -1424,7 +1425,7 @@ document.querySelectorAll('.l2-view-mapa').forEach(v => {
 renderTabBar();
 renderProgramsGrid();
 
-/* ================= DATA UPDATE (spreadsheet upload) ================= */
+/* ================= DATA UPDATE (Google Sheets) ================= */
 const ORG_LABEL_TO_KEY = Object.create(null);
 Object.keys(ORGS).forEach(k => { ORG_LABEL_TO_KEY[ORGS[k].label] = k; });
 
@@ -1476,7 +1477,7 @@ function richHtmlToStrongMarkup(html) {
 }
 
 // Reads a sheet into an array of row objects, preserving real bold formatting
-// (from Excel's bold button) as <strong> tags for the columns listed in richCols.
+// (from the source cell formatting) as <strong> tags for the columns listed in richCols.
 function sheetToRowsWithRich(sheet, richCols) {
   if (!sheet['!ref']) return [];
   const range = XLSX.utils.decode_range(sheet['!ref']);
@@ -1551,67 +1552,37 @@ function parseExtSheet(wb) {
   return {ext,colors,extra,warnings:[]};
 }
 
-let spreadsheetReaderPromise = null;
-function ensureSpreadsheetReader(filename) {
-  if (/\.xlsx$/i.test(filename)) { globalThis.XLSX=globalThis.NativeXLSX; return Promise.resolve(XLSX); }
-  if (typeof XLSX !== 'undefined' && XLSX.version !== 'local-xlsx') return Promise.resolve(XLSX);
-  if (spreadsheetReaderPromise) return spreadsheetReaderPromise;
-  spreadsheetReaderPromise = new Promise((resolve,reject) => {
-    const script = document.createElement('script');
-    const fail = () => { clearTimeout(timer); script.remove(); spreadsheetReaderPromise=null; reject(new Error('Não foi possível carregar o leitor de Excel. Verifique a conexão e tente novamente.')); };
-    const timer = setTimeout(fail,20000);
-    script.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
-    script.onload = () => { clearTimeout(timer); if (typeof XLSX === 'undefined') fail(); else resolve(XLSX); };
-    script.onerror = fail;
-    document.head.appendChild(script);
-  });
-  return spreadsheetReaderPromise;
-}
-
 let importingSpreadsheet = false;
-async function handleSpreadsheetUpload(file) {
-  if (!file || importingSpreadsheet) return;
-  if (!/\.xlsx?$/i.test(file.name)) { showDataStatus('Escolha uma planilha .xlsx ou .xls.',true); return; }
-  if (file.size > 10*1024*1024) { showDataStatus('A planilha deve ter no máximo 10 MB.',true); return; }
-  importingSpreadsheet = true;
-  const upload = document.getElementById('data-upload-btn'); upload.disabled = true;
-  document.getElementById('data-reset-btn').disabled = true;
-  showDataStatus('Lendo planilha…',false);
+let sheetsPreviewSource = null;
+async function handleGoogleSheetsUpdate() {
+  if (importingSpreadsheet || publishingData) return;
+  if (!IS_HOSTED || !sharedReady || !adminUnlocked) { showDataStatus('Entre com uma conta administradora no site para atualizar os dados do Google Sheets.',true); return; }
+  importingSpreadsheet=true; refreshAdminUI();
+  document.getElementById('data-reset-btn').disabled=true;
+  showDataStatus('Lendo Google Sheets…',false);
   try {
-    const reader = await ensureSpreadsheetReader(file.name);
-    globalThis.XLSX=reader;
-    const wb = await reader.read(new Uint8Array(await file.arrayBuffer()), { type:'array', cellHTML:true, sheetRows:5002 });
-    if (!wb.Sheets.Programas) throw new Error('A planilha precisa ter uma aba chamada Programas.');
-    const parsed = rowsToDimensions(sheetToRowsWithRich(wb.Sheets.Programas,['Descrição']));
-    const external = parseExtSheet(wb);
-    const candidate = validateSnapshot({dims:parsed.dims,ext:external.ext,colors:external.colors,extra:external.extra});
-    const count = Object.values(candidate.dims).reduce((n,p)=>n+Object.keys(p).length,0);
-    if (!count) throw new Error('Nenhum programa encontrado.');
-    const previous = {dims:DIMENSIONS,ext:MAP_EXT,colors:EXT_COLORS,extra:MAP_ORGS_EXTRA};
-    try {
-      applySnapshot(candidate); reloadProgramsData();
-    } catch (err) { applySnapshot(previous); reloadProgramsData(); throw err; }
-    usingLocalData = true; localDataWhen = new Date().toISOString();
-    let persisted = true;
-    try { localStorage.setItem(STORAGE_KEY,JSON.stringify({v:DATA_VERSION,when:localDataWhen,...candidate})); } catch(e) { persisted=false; }
-    refreshAdminUI();
-    const warning = parsed.invalidPub.length ? ' Há valores de Público Atendido fora da lista padrão.' : '';
-    if (IS_HOSTED) {
-      const saved = await publishSharedData();
-      if (saved && warning) showDataStatus(document.getElementById('data-status').textContent + warning,false);
-    } else {
-      showDataStatus(count + ' programas importados. A atualização aparece apenas neste navegador.' + (persisted ? '' : ' O armazenamento está indisponível: mantenha a página aberta.') + warning,false);
-    }
-  } catch(err) {
-    console.error(err); showDataStatus('Importação cancelada: ' + err.message,true);
-  } finally { importingSpreadsheet=false; upload.disabled=false; document.getElementById('data-reset-btn').disabled=false; refreshAdminUI(); }
+    const response=await fetch('/api/sheets/preview',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:'{}',signal:AbortSignal.timeout(60000)});
+    const data=await response.json();
+    if(!response.ok)throw new Error(data.error||'Não foi possível ler o Google Sheets.');
+    const wb=data.workbook;
+    if(!wb||!wb.Sheets||!wb.Sheets.Programas)throw new Error('A fonte não contém a aba Programas.');
+    globalThis.XLSX=globalThis.NativeXLSX;
+    const parsed=rowsToDimensions(sheetToRowsWithRich(wb.Sheets.Programas,['Descrição']));
+    const external=parseExtSheet(wb);
+    const candidate=validateSnapshot({dims:parsed.dims,ext:external.ext,colors:external.colors,extra:external.extra});
+    const count=Object.values(candidate.dims).reduce((n,p)=>n+Object.keys(p).length,0);
+    if(!count)throw new Error('Nenhum programa encontrado.');
+    const previous={dims:DIMENSIONS,ext:MAP_EXT,colors:EXT_COLORS,extra:MAP_ORGS_EXTRA};
+    try{applySnapshot(candidate);reloadProgramsData();}catch(error){applySnapshot(previous);reloadProgramsData();throw error;}
+    usingLocalData=true;localDataWhen=data.readAt||new Date().toISOString();
+    sheetsPreviewSource={title:String(data.title||'Google Sheets'),readAt:localDataWhen};
+    const sourceLink=document.getElementById('data-source-link');
+    if(/^https:\/\/docs\.google\.com\/spreadsheets\/d\/[A-Za-z0-9_-]{20,150}\/edit$/.test(data.url||'')){sourceLink.href=data.url;sourceLink.hidden=false;}
+    const warning=parsed.invalidPub.length?' Há valores de Público Atendido fora da lista padrão.':'';
+    showDataStatus('Prévia de '+count+' programas de “'+sheetsPreviewSource.title+'”. Confira o mapa e clique em Publicar atualização para disponibilizar esta versão.'+warning,false);
+  } catch(error) { showDataStatus('Atualização cancelada: '+(error.name==='TimeoutError'?'O Google Sheets demorou a responder. Tente novamente.':error.message)+(error.message.includes('Os dados publicados foram preservados.')?'':' Os dados publicados foram preservados.'),true); }
+  finally { importingSpreadsheet=false;document.getElementById('data-reset-btn').disabled=false;refreshAdminUI(); }
 }
-
-document.getElementById('data-upload-input').addEventListener('change', function(e) {
-  const file = e.target.files[0];
-  if (adminUnlocked) handleSpreadsheetUpload(file);
-  e.target.value = '';
-});
 
 document.getElementById('pw-modal').addEventListener('keydown', e => {
   if (e.key === 'Escape') { e.preventDefault(); closePw(); }
@@ -1650,15 +1621,16 @@ function tryPw() {
 function fmtWhen(iso) { try { return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }); } catch (e) { return ''; } }
 function refreshAdminUI() {
   document.getElementById('data-management-label').hidden = IS_HOSTED && !adminUnlocked;
-  document.getElementById('data-upload-btn').hidden = IS_HOSTED && !adminUnlocked;
+  document.getElementById('data-upload-btn').hidden = !IS_HOSTED || !adminUnlocked;
+  document.getElementById('data-confirm-btn').hidden = !IS_HOSTED || !adminUnlocked || !usingLocalData;
+  document.getElementById('data-confirm-btn').disabled = importingSpreadsheet || publishingData || !sharedReady;
+  document.getElementById('data-source-link').hidden = !IS_HOSTED || !adminUnlocked || !document.getElementById('data-source-link').getAttribute('href');
   document.getElementById('data-upload-btn').disabled = IS_HOSTED && (!sharedReady || importingSpreadsheet || publishingData);
   document.getElementById('data-reset-btn').hidden = !usingLocalData;
 }
-document.getElementById('data-upload-btn').addEventListener('click', () => {
-  if (IS_HOSTED && (!sharedReady || !adminUnlocked)) { showDataStatus('Sua conta não está autorizada a editar o mapa ou a versão compartilhada ainda não foi carregada.',true); return; }
-  const open = () => document.getElementById('data-upload-input').click();
-  if (adminUnlocked) open(); else openPw(open);
-});
+document.getElementById('data-upload-btn').addEventListener('click', handleGoogleSheetsUpdate);
+document.getElementById('data-confirm-btn').addEventListener('click', () => { if (!importingSpreadsheet) void publishSharedData(); });
+
 document.getElementById('pw-ok').addEventListener('click', tryPw);
 document.getElementById('pw-cancel').addEventListener('click', closePw);
 document.getElementById('pw-input').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); tryPw(); } });
@@ -1673,7 +1645,7 @@ document.getElementById('data-reset-btn').addEventListener('click', () => {
 
 async function loadSharedData() {
   if (!IS_HOSTED) return;
-  if (usingLocalData) { showDataStatus('A atualização ainda não foi salva. Importe a planilha novamente para tentar ou volte aos dados publicados.',true); return; }
+  if (usingLocalData) { showDataStatus('A atualização ainda não foi salva. Leia o Google Sheets novamente para tentar ou volte aos dados publicados.',true); return; }
   try {
     const [sessionResponse,dataResponse] = await Promise.all([
       fetch('/api/session',{cache:'no-store',credentials:'same-origin'}),
@@ -1714,7 +1686,7 @@ if (typeof addEventListener==='function') addEventListener('beforeunload',event=
 
 refreshAdminUI();
 setView(activeView);
-if (usingLocalData) showDataStatus(`Mostrando a planilha importada neste navegador (${fmtWhen(localDataWhen)}). Quem abre o mapa em outro lugar vê os dados publicados.`, false);
+if (usingLocalData) showDataStatus(`Mostrando a prévia neste navegador (${fmtWhen(localDataWhen)}). Quem abre o mapa em outro lugar vê os dados publicados.`, false);
 
 // ---------- Mapas de atuação clicáveis ----------
 const MAP_HOTSPOTS = {"alfa":[{"k":"Alfabetização > Política Nacional > CNCA","x":15.962,"y":17.433,"w":6.159,"h":4.515},{"k":"Alfabetização > Política Nacional > BNCC","x":15.852,"y":23.913,"w":6.379,"h":2.09},{"k":"Alfabetização > Política Nacional > Recomposição das aprendizagens","x":15.852,"y":28.344,"w":6.352,"h":2.676},{"k":"Alfabetização > Política Nacional > SAEB","x":15.852,"y":33.278,"w":6.352,"h":2.048},{"k":"Alfabetização > Política Nacional > PNEI","x":15.852,"y":37.709,"w":6.379,"h":2.09},{"k":"Alfabetização > Política Nacional > Toda Matemática","x":15.962,"y":42.308,"w":6.131,"h":1.756},{"k":"Alfabetização > Política Nacional > PNEERQ","x":15.852,"y":46.572,"w":6.352,"h":2.048},{"k":"Alfabetização > Política Nacional > Referencial para Qualidade e Equidade da Gestão Escolar","x":15.852,"y":77.383,"w":7.125,"h":4.055},{"k":"Alfabetização > Política Nacional > Conectividade","x":15.852,"y":87.584,"w":7.125,"h":1.923},{"k":"Alfabetização > Política Nacional > Sistema de gestão","x":15.852,"y":93.186,"w":7.125,"h":2.55},{"k":"Alfabetização > Política no Território > Compromisso político","x":28.749,"y":15.092,"w":6.131,"h":2.676},{"k":"Alfabetização > Política no Território > Desenho de políticas estaduais de alfabetização por meio de Regime de Colaboração","x":40.928,"y":14.507,"w":9.97,"h":3.804},{"k":"Alfabetização > Política no Território > Currículo","x":36.482,"y":24.916,"w":6.159,"h":1.672},{"k":"Alfabetização > Política no Território > Pré escola","x":34.907,"y":35.033,"w":6.159,"h":1.63},{"k":"Alfabetização > Política no Território > Inovação no ensino da matemática","x":34.907,"y":39.883,"w":6.159,"h":2.717},{"k":"Alfabetização > Política no Território > Revisão curricular para equidade racial","x":34.687,"y":46.279,"w":6.352,"h":2.676},{"k":"Alfabetização > Política no Território > Avaliações e monitoramento","x":50.732,"y":24.875,"w":8.478,"h":1.923},{"k":"Alfabetização > Política no Território > Desenvolvimento de capacidades de professores","x":50.732,"y":29.64,"w":8.478,"h":2.717},{"k":"Alfabetização > Política no Território > Material didático e metodologias","x":50.732,"y":36.622,"w":8.478,"h":2.676},{"k":"Alfabetização > Política no Território > Focalização de ações para equidade","x":50.953,"y":42.851,"w":8.313,"h":2.759},{"k":"Alfabetização > Política no Território > Plano estratégico de atuação","x":27.561,"y":63.671,"w":8.506,"h":2.048},{"k":"Alfabetização > Política no Território > Engajamento e conversão de liderança política","x":27.561,"y":67.809,"w":8.506,"h":2.676},{"k":"Alfabetização > Política no Território > Fortalecimento de lideranças locais","x":32.173,"y":72.91,"w":9.693,"h":3.01},{"k":"Alfabetização > Política no Território > Políticas de incentivo","x":48.743,"y":56.313,"w":8.313,"h":1.672},{"k":"Alfabetização > Política no Território > Fortalecimento de regionais","x":48.688,"y":61.371,"w":8.506,"h":2.299},{"k":"Alfabetização > Política no Território > Metas e ações","x":48.743,"y":68.018,"w":8.313,"h":2.383},{"k":"Alfabetização > Política no Território > Seleção e desenvolvimento de gestores escolares","x":39.74,"y":78.094,"w":8.506,"h":2.676},{"k":"Alfabetização > Política no Território > Conectividade local","x":44.822,"y":87.249,"w":7.208,"h":2.634},{"k":"Alfabetização > Política no Território > Sistema de gestão","x":43.054,"y":93.102,"w":8.92,"h":2.676},{"k":"Alfabetização > Implementação > Recomposição das aprendizagens 3º a 5º","x":70.064,"y":22.408,"w":8.975,"h":2.759},{"k":"Alfabetização > Implementação > Aplicação de avaliações","x":67.274,"y":27.132,"w":6.352,"h":2.676},{"k":"Alfabetização > Implementação > Devolutiva de avaliações","x":74.896,"y":27.09,"w":6.324,"h":2.717},{"k":"Alfabetização > Implementação > Formação de professores","x":67.247,"y":32.901,"w":6.324,"h":2.676},{"k":"Alfabetização > Implementação > Planejamento de aula","x":74.896,"y":32.901,"w":6.324,"h":2.676},{"k":"Alfabetização > Implementação > Acompanhamento pedagógico","x":69.87,"y":39.256,"w":9.362,"h":1.923},{"k":"Alfabetização > Implementação > Monitoramento de implementação","x":70.174,"y":43.98,"w":8.754,"h":2.676},{"k":"Alfabetização > Implementação > Gestão para resultados","x":69.815,"y":68.06,"w":8.313,"h":2.425}],"fund2":[{"k":"Fundamental 2 > Política Nacional > Escola das Adolescências","x":15.899,"y":14.112,"w":7.006,"h":2.94},{"k":"Fundamental 2 > Política Nacional > BNCC","x":15.785,"y":19.488,"w":7.235,"h":2.268},{"k":"Fundamental 2 > Política Nacional > Recomposição das aprendizagens","x":15.899,"y":24.57,"w":7.006,"h":2.898},{"k":"Fundamental 2 > Política Nacional > SAEB","x":15.785,"y":29.357,"w":7.235,"h":2.226},{"k":"Fundamental 2 > Política Nacional > Toda Matemática","x":15.871,"y":33.473,"w":7.063,"h":1.932},{"k":"Fundamental 2 > Política Nacional > PNEERQ","x":15.842,"y":38.513,"w":7.235,"h":2.226},{"k":"Fundamental 2 > Política Nacional > Escola Integral em tempo integral","x":15.814,"y":43.133,"w":7.235,"h":2.898},{"k":"Fundamental 2 > Política Nacional > PNE","x":15.842,"y":65.729,"w":7.235,"h":2.226},{"k":"Fundamental 2 > Política Nacional > Referencial para Qualidade e Equidade da Gestão Escolar","x":15.785,"y":79.0,"w":7.235,"h":4.326},{"k":"Fundamental 2 > Política Nacional > Conectividade","x":15.785,"y":87.862,"w":7.235,"h":2.226},{"k":"Fundamental 2 > Política Nacional > Sistema de gestão","x":15.785,"y":94.078,"w":7.235,"h":2.226},{"k":"Fundamental 2 > Política no Território > Currículos locais","x":29.111,"y":18.858,"w":5.805,"h":2.226},{"k":"Fundamental 2 > Política no Território > Priorização curricular","x":36.889,"y":18.522,"w":5.576,"h":2.898},{"k":"Fundamental 2 > Política no Território > Inovações no ensino de matemática","x":28.996,"y":33.011,"w":7.835,"h":2.898},{"k":"Fundamental 2 > Política no Território > Revisão curricular para equidade racial","x":29.082,"y":38.177,"w":7.749,"h":2.898},{"k":"Fundamental 2 > Política no Território > Desenho de políticas de educação integral","x":28.853,"y":43.133,"w":8.035,"h":2.898},{"k":"Fundamental 2 > Política no Território > Recomposição das aprendizagens","x":49.643,"y":13.608,"w":7.607,"h":2.898},{"k":"Fundamental 2 > Política no Território > Avaliação","x":49.528,"y":18.858,"w":7.835,"h":2.898},{"k":"Fundamental 2 > Política no Território > Material didático e metodologias","x":49.528,"y":24.696,"w":7.835,"h":2.898},{"k":"Fundamental 2 > Política no Território > Formação de professores","x":49.528,"y":31.121,"w":7.835,"h":2.898},{"k":"Fundamental 2 > Política no Território > Focalização de ações para equidade","x":49.643,"y":36.875,"w":7.607,"h":2.94},{"k":"Fundamental 2 > Política no Território > Regime de Colaboração","x":36.774,"y":52.163,"w":6.291,"h":2.898},{"k":"Fundamental 2 > Política no Território > Fortalecimento de regionais","x":47.526,"y":52.163,"w":6.291,"h":2.898},{"k":"Fundamental 2 > Política no Território > Planejamento de viabilizadores do tempo integral","x":46.411,"y":58.043,"w":10.323,"h":2.94},{"k":"Fundamental 2 > Política no Território > Plano estratégico de atuação","x":28.253,"y":65.393,"w":9.065,"h":2.898},{"k":"Fundamental 2 > Política no Território > Metas e ações","x":43.78,"y":67.493,"w":6.091,"h":2.562},{"k":"Fundamental 2 > Política no Território > Engajamento e conversão de liderança política","x":28.253,"y":70.643,"w":9.065,"h":2.898},{"k":"Fundamental 2 > Política no Território > Fortalecimento de lideranças locais","x":32.857,"y":76.522,"w":10.466,"h":2.898},{"k":"Fundamental 2 > Política no Território > Seleção e desenvolvimento de gestores escolares","x":42.722,"y":80.932,"w":9.408,"h":2.898},{"k":"Fundamental 2 > Política no Território > Conectividade local","x":40.292,"y":87.946,"w":6.777,"h":2.1},{"k":"Fundamental 2 > Política no Território > Sistema de gestão","x":37.775,"y":93.784,"w":10.323,"h":2.856},{"k":"Fundamental 2 > Implementação > Aplicação de avaliações","x":64.341,"y":14.49,"w":6.291,"h":2.898},{"k":"Fundamental 2 > Implementação > Devolutiva de avaliações","x":73.549,"y":14.49,"w":6.291,"h":2.898},{"k":"Fundamental 2 > Implementação > Recomposição das aprendizagens","x":68.287,"y":20.202,"w":6.491,"h":2.898},{"k":"Fundamental 2 > Implementação > Formação de professores","x":64.341,"y":25.661,"w":6.291,"h":2.898},{"k":"Fundamental 2 > Implementação > Planejamento de aula","x":73.549,"y":25.619,"w":6.291,"h":2.898},{"k":"Fundamental 2 > Implementação > Acompanhamento pedagógico","x":68.401,"y":30.659,"w":6.777,"h":2.898},{"k":"Fundamental 2 > Implementação > Monitoramento de implementação","x":68.687,"y":37.085,"w":6.234,"h":3.15},{"k":"Fundamental 2 > Implementação > Gestão para resultados","x":68.23,"y":67.325,"w":6.091,"h":2.94}],"lid":[{"k":"Lideranças > Pipeline > Gestão pública – impacto direto > Desafios e lacunas na gestão pública","x":15.657,"y":7.926,"w":5.14,"h":1.971},{"k":"Lideranças > Pipeline > Gestão pública – impacto direto > Atração e seleção","x":20.148,"y":11.91,"w":5.14,"h":1.478},{"k":"Lideranças > Pipeline > Gestão pública – impacto direto > Formação","x":26.942,"y":11.91,"w":5.14,"h":1.478},{"k":"Lideranças > Pipeline > Gestão pública – impacto direto > Alocação","x":34.594,"y":11.91,"w":5.17,"h":1.478},{"k":"Lideranças > Pipeline > Gestão pública – impacto direto > Redes","x":30.871,"y":17.864,"w":10.222,"h":1.478},{"k":"Lideranças > Em exercício > Gestão pública – impacto direto > Desafios e lacunas na gestão pública","x":46.854,"y":7.556,"w":5.14,"h":1.971},{"k":"Lideranças > Em exercício > Gestão pública – impacto direto > Engajamento político","x":49.453,"y":11.786,"w":5.14,"h":1.478},{"k":"Lideranças > Em exercício > Gestão pública – impacto direto > Atração e seleção","x":56.721,"y":11.786,"w":5.14,"h":1.478},{"k":"Lideranças > Em exercício > Gestão pública – impacto direto > Formação","x":64.018,"y":11.786,"w":5.14,"h":1.478},{"k":"Lideranças > Em exercício > Gestão pública – impacto direto > Alocação","x":71.285,"y":11.786,"w":5.17,"h":1.478},{"k":"Lideranças > Em exercício > Gestão pública – impacto direto > Redes","x":67.267,"y":17.864,"w":10.251,"h":1.478},{"k":"Lideranças > Pipeline > Gestão pública – impacto via governo > Desafios e lacunas na gestão pública","x":15.391,"y":25.832,"w":5.14,"h":1.971},{"k":"Lideranças > Pipeline > Gestão pública – impacto via governo > Atração e seleção","x":20.739,"y":29.815,"w":5.14,"h":1.52},{"k":"Lideranças > Pipeline > Gestão pública – impacto via governo > Formação","x":27.533,"y":29.815,"w":5.14,"h":1.52},{"k":"Lideranças > Pipeline > Gestão pública – impacto via governo > Alocação","x":35.214,"y":29.815,"w":5.14,"h":1.478},{"k":"Lideranças > Pipeline > Gestão pública – impacto via governo > Redes","x":30.871,"y":35.77,"w":10.222,"h":1.478},{"k":"Lideranças > Em exercício > Gestão pública – impacto via governo > Advocacy por políticas de lideranças","x":44.727,"y":24.887,"w":5.938,"h":1.971},{"k":"Lideranças > Em exercício > Gestão pública – impacto via governo > Diagnóstico e lacunas na agenda","x":45.14,"y":29.733,"w":5.14,"h":1.93},{"k":"Lideranças > Em exercício > Gestão pública – impacto via governo > Compromisso político","x":50.926,"y":29.568,"w":6.583,"h":2.296},{"k":"Lideranças > Em exercício > Gestão pública – impacto via governo > Desenvolvimento de capacidade no governo","x":58.139,"y":29.733,"w":5.908,"h":1.93},{"k":"Lideranças > Em exercício > Gestão pública – impacto via governo > Formação de público-chave","x":65.406,"y":29.733,"w":5.14,"h":1.93},{"k":"Lideranças > Em exercício > Gestão pública – impacto via governo > Avaliação de desempenho","x":71.876,"y":29.733,"w":5.17,"h":1.93},{"k":"Lideranças > Em exercício > Gestão pública – impacto via governo > Redes","x":64.668,"y":35.359,"w":10.251,"h":1.478},{"k":"Lideranças > Em exercício > Políticos em exercício – cargos eletivos > Atração","x":53.264,"y":43.162,"w":5.14,"h":1.478},{"k":"Lideranças > Em exercício > Políticos em exercício – cargos eletivos > Formação","x":65.436,"y":43.162,"w":5.14,"h":1.478},{"k":"Lideranças > Em exercício > Políticos em exercício – cargos eletivos > Redes","x":65.318,"y":47.762,"w":10.251,"h":1.643},{"k":"Lideranças > Pipeline > Atuação temática – impacto direto > Desafios e lacunas na gestão pública","x":15.746,"y":54.127,"w":5.14,"h":1.971},{"k":"Lideranças > Pipeline > Atuação temática – impacto direto > Atração e seleção","x":21.093,"y":58.07,"w":5.17,"h":1.52},{"k":"Lideranças > Pipeline > Atuação temática – impacto direto > Formação","x":27.917,"y":58.07,"w":5.14,"h":1.52},{"k":"Lideranças > Pipeline > Atuação temática – impacto direto > Alocação","x":35.569,"y":58.07,"w":5.14,"h":1.52},{"k":"Lideranças > Pipeline > Atuação temática – impacto direto > Redes","x":31.226,"y":64.025,"w":10.251,"h":1.52},{"k":"Lideranças > Em exercício > Atuação temática – impacto direto > Desafios e lacunas na gestão pública","x":44.904,"y":53.799,"w":5.14,"h":1.93},{"k":"Lideranças > Em exercício > Atuação temática – impacto direto > Engajamento político","x":52.496,"y":56.427,"w":5.14,"h":1.478},{"k":"Lideranças > Em exercício > Atuação temática – impacto direto > Atração e seleção","x":60.089,"y":56.427,"w":5.14,"h":1.478},{"k":"Lideranças > Em exercício > Atuação temática – impacto direto > Formação","x":67.681,"y":56.427,"w":5.14,"h":1.478},{"k":"Lideranças > Em exercício > Atuação temática – impacto direto > Redes","x":66.706,"y":62.053,"w":10.251,"h":1.52},{"k":"Lideranças > Em exercício > Atuação temática – impacto via governo > Advocacy por políticas públicas temáticas","x":44.106,"y":70.185,"w":5.938,"h":1.971},{"k":"Lideranças > Em exercício > Atuação temática – impacto via governo > Desafios e lacunas na gestão pública","x":45.554,"y":75.072,"w":5.14,"h":1.971},{"k":"Lideranças > Em exercício > Atuação temática – impacto via governo > Compromisso político","x":51.4,"y":74.927,"w":6.583,"h":2.296},{"k":"Lideranças > Em exercício > Atuação temática – impacto via governo > Desenvolvimento de capacidade no governo","x":58.641,"y":75.072,"w":5.938,"h":1.971},{"k":"Lideranças > Em exercício > Atuação temática – impacto via governo > Formação de público-chave","x":65.968,"y":75.072,"w":5.17,"h":1.971},{"k":"Lideranças > Em exercício > Atuação temática – impacto via governo > Avaliação de desempenho","x":72.526,"y":75.072,"w":5.14,"h":1.971},{"k":"Lideranças > Em exercício > Atuação temática – impacto via governo > Redes","x":64.549,"y":79.671,"w":10.251,"h":1.478},{"k":"Lideranças > Pipeline > Outras teses fora da gestão pública > Atração e seleção","x":15.746,"y":89.651,"w":5.14,"h":1.478},{"k":"Lideranças > Pipeline > Outras teses fora da gestão pública > Formação","x":23.575,"y":89.651,"w":5.14,"h":1.478},{"k":"Lideranças > Pipeline > Outras teses fora da gestão pública > Alocação","x":31.374,"y":87.967,"w":5.14,"h":1.478},{"k":"Lideranças > Pipeline > Outras teses fora da gestão pública > Redes","x":31.196,"y":91.54,"w":10.251,"h":1.52},{"k":"Lideranças > Em exercício > Outras teses fora da gestão pública > Atração e seleção","x":49.897,"y":87.269,"w":5.14,"h":1.478},{"k":"Lideranças > Em exercício > Outras teses fora da gestão pública > Formação","x":58.05,"y":87.269,"w":5.14,"h":1.478},{"k":"Lideranças > Em exercício > Outras teses fora da gestão pública > Alocação","x":66.233,"y":86.53,"w":5.14,"h":1.52},{"k":"Lideranças > Em exercício > Outras teses fora da gestão pública > Redes","x":66.529,"y":90.021,"w":10.251,"h":1.52}]};
