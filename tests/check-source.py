@@ -35,7 +35,10 @@ assert len(parsed.ids) == len(set(parsed.ids)), "Duplicate IDs"
 assert all(ref in parsed.ids for ref in parsed.references)
 assert parsed.main == 1 and len(parsed.headings) == 1
 assert "cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5" not in text
-assert "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" in text
+assert "https://cdn.sheetjs.com/" not in text
+assert 'id="data-upload-input"' not in text
+assert 'id="data-confirm-btn"' in text
+assert "handleGoogleSheetsUpdate" in text
 assert 'name="viewport"' in text
 assert 'role="status"' in text and "aria-live" in text
 assert "font-family=" in text

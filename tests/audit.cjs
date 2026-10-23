@@ -22,6 +22,7 @@ class Element {
   querySelector(selector){return this.querySelectorAll(selector)[0]||null;}
   closest(selector){return this.matches(selector)?this:this.parentElement?.closest(selector)||null;}
   setAttribute(k,v){this.attributes[k]=v;if(k==='class')this.className=v;else this[k]=v;}
+  getAttribute(k){return this.attributes[k]??this[k]??null;}
   focus(){document.activeElement=this;}
   select(){}
   remove(){if(this.parentElement)this.parentElement.children=this.parentElement.children.filter(e=>e!==this);}
@@ -123,7 +124,6 @@ console.log('Map label bounds and accessible lists passed for all 127 strategies
 function decodeCell(address){const match=address.match(/^([A-Z]+)(\d+)$/);let col=0;for(const c of match[1])col=col*26+c.charCodeAt(0)-64;return {r:Number(match[2])-1,c:col-1};}
 function encodeCell(cell){let col=cell.c+1,label='';while(col){col--;label=String.fromCharCode(65+col%26)+label;col=Math.floor(col/26);}return label+(cell.r+1);}
 function decodeRange(ref){const [start,end=start]=ref.split(':');return {s:decodeCell(start),e:decodeCell(end)};}
-let workbook={Sheets:structuredClone(fixture.sheets)};
 const utils={
   decode_range:decodeRange,encode_cell:encodeCell,
   sheet_to_json(sheet,options={}){
@@ -133,35 +133,9 @@ const utils={
     return grid.slice(1).map(row=>Object.fromEntries(grid[0].map((key,i)=>[key,row[i]??'']).filter(entry=>entry[0])));
   }
 };
-ctx.XLSX={utils,read:()=>workbook};ctx.NativeXLSX=ctx.XLSX;
-const fakeFile={name:'dados.xlsx',size:100,arrayBuffer:async()=>new ArrayBuffer(1)};
-ctx.uploadFile=fakeFile;
-const quietConsole={...console,error:()=>{}};
-ctx.console=quietConsole;
+ctx.XLSX={utils};ctx.NativeXLSX=ctx.XLSX;
+const quietConsole={...console,error:()=>{}};ctx.console=quietConsole;
 (async()=>{
-  run('adminUnlocked=true');
-  ctx.localStorage={getItem:()=>null,setItem:()=>{throw new Error('quota')},removeItem:()=>{}};
-  await run('handleSpreadsheetUpload(uploadFile)');
-  assert.equal(run('usingLocalData'),true);
-  assert(document.getElementById('data-status').textContent.includes('armazenamento está indisponível'));
-  const snapshot=run('JSON.stringify([DIMENSIONS,MAP_EXT,EXT_COLORS,MAP_ORGS_EXTRA])');
-  const badCases=[
-    wb=>{delete wb.Sheets.Programas.H1;},
-    wb=>{wb.Sheets.Programas.A2.v='Não existe';},
-    wb=>{wb.Sheets.Programas.K2.v='Chave incorreta';},
-    wb=>{wb.Sheets['Além do mapa programático'].J2.v='cor inválida';},
-    wb=>{delete wb.Sheets['Além do mapa programático'].G1;},
-  ];
-  for(const alter of badCases){
-    workbook={Sheets:structuredClone(fixture.sheets)};alter(workbook);
-    await run('handleSpreadsheetUpload(uploadFile)');
-    assert(document.getElementById('data-status').textContent.startsWith('Importação cancelada:'),'Invalid file must be rejected');
-    assert.equal(run('JSON.stringify([DIMENSIONS,MAP_EXT,EXT_COLORS,MAP_ORGS_EXTRA])'),snapshot,'Failed import must be atomic');
-    assert.equal(document.getElementById('data-upload-btn').disabled,false);
-  }
-  workbook={Sheets:structuredClone(fixture.sheets)};
-  await run('handleSpreadsheetUpload(uploadFile)');
-  assert(document.getElementById('data-status').textContent.includes('38 programas importados'));
   const stored={v:run('DATA_VERSION'),dims:{abc:{Broken:{}}}};
   const context2=vm.createContext({...ctx,localStorage:{getItem:()=>JSON.stringify(stored),removeItem:()=>{}}});
   vm.runInContext(js,context2);
@@ -170,57 +144,49 @@ ctx.console=quietConsole;
   const blobs=[];ctx.URL={createObjectURL:blob=>{blobs.push(blob);return 'blob:test'},revokeObjectURL:()=>{}};
   for(const {view} of maps){ctx.downloadView=view;run('downloadCurrentMap(downloadView,{preventDefault(){}})');}
   for(const blob of blobs){const svg=await blob.text();assert(svg.includes('font-family='));assert(svg.includes('<rect'));assert(svg.includes('<circle'));assert(svg.includes('data:image/webp;base64,TEST'));}
-  console.log('Atomic imports, invalid headers, unavailable storage, corrupted cache and map exports passed');
-  const actualBytes=fs.readFileSync(path.join(__dirname,'fixtures/dados.xlsx'));
-  ctx.NativeXLSX=nativeReader;
-  const realFile={name:'dados.xlsx',size:actualBytes.length,arrayBuffer:async()=>actualBytes.buffer.slice(actualBytes.byteOffset,actualBytes.byteOffset+actualBytes.byteLength)};
-  ctx.uploadFile=realFile;
-  await run('handleSpreadsheetUpload(uploadFile)');
-  assert(document.getElementById('data-status').textContent.includes('38 programas importados'));
-  console.log('Actual XLSX bytes passed the complete import and validation pipeline');
-
+  console.log('Corrupted cache and map exports passed');
   const workerSource=fs.readFileSync(path.join(__dirname,'../worker/index.js'),'utf8');
   const worker=(await import('data:text/javascript;base64,'+Buffer.from(workerSource).toString('base64'))).default;
   let sharedBody=null,sharedETag=null,sharedWrites=0;
+  let workbook={Sheets:structuredClone(fixture.sheets)};
+  let upstreamFailure=false;
   const origin='https://integration.example';
-  const bucket={
-    get:async()=>sharedBody?{etag:sharedETag,json:async()=>JSON.parse(sharedBody)}:null,
-    put:async(key,body,options)=>{
-      if(options.onlyIf instanceof Headers ? sharedBody!==null : options.onlyIf.etagMatches!==sharedETag)return null;
-      sharedBody=body;sharedETag='revision-'+(++sharedWrites);return {etag:sharedETag};
-    }
-  };
+  const bucket={get:async()=>sharedBody?{etag:sharedETag,json:async()=>JSON.parse(sharedBody)}:null,put:async(key,body,options)=>{
+    if(options.onlyIf instanceof Headers?sharedBody!==null:options.onlyIf.etagMatches!==sharedETag)return null;
+    sharedBody=body;sharedETag='revision-'+(++sharedWrites);return {etag:sharedETag};
+  }};
   const env={SITE_AUTH_MODE:'sites',BUCKET:bucket,MAP_ADMIN_EMAILS:'owner@example.test',MAP_ORIGIN:origin};
   function hostedContext(email){
-    const hosted=vm.createContext({...ctx,location:{protocol:'https:'},URL,uploadFile:realFile,fetch:(url,options={})=>{
-      const headers=new Headers(options.headers);
-      headers.set('oai-authenticated-user-id',email);
-      headers.set('oai-authenticated-user-email',email);
+    const hosted=vm.createContext({...ctx,AbortSignal,location:{protocol:'https:'},URL,fetch:(url,options={})=>{
+      if(url==='/api/sheets/preview'){
+        assert.equal(options.method,'POST');
+        if(email!=='owner@example.test')return Promise.resolve(Response.json({error:'Sem permissão'}, {status:403}));
+        return Promise.resolve(upstreamFailure?Response.json({error:'Fonte indisponível'},{status:503}):Response.json({workbook,title:'Fonte de teste',readAt:new Date().toISOString(),url:'https://docs.google.com/spreadsheets/d/abcdefghijklmnopqrstuv123456/edit'}));
+      }
+      const headers=new Headers(options.headers);headers.set('oai-authenticated-user-id',email);headers.set('oai-authenticated-user-email',email);
       if(options.method==='PUT')headers.set('origin',origin);
       return worker.fetch(new Request(origin+url,{...options,headers}),env,{});
     }});
-    vm.runInContext(js,hosted);
-    return hosted;
+    vm.runInContext(js,hosted);hosted.NativeXLSX={utils};return hosted;
   }
   const owner=hostedContext('owner@example.test'),execute=s=>vm.runInContext(s,owner);
   await execute('loadSharedData()');
   assert.equal(document.getElementById('data-management-label').hidden,false);
   assert.equal(execute('adminUnlocked && sharedReady'),true);
-  await execute('handleSpreadsheetUpload(uploadFile)');
-  assert.equal(sharedWrites,1);
-  assert.equal(execute('usingLocalData'),false);
-  assert.equal(execute('sharedRevision'),'revision-1');
-  const viewer=hostedContext('viewer@example.test');
-  await vm.runInContext('loadSharedData()',viewer);
-  assert.equal(vm.runInContext('sharedRevision',viewer),'revision-1');
-  assert.equal(vm.runInContext('adminUnlocked',viewer),false);
-  assert.equal(document.getElementById('data-upload-btn').hidden,true);
-  assert.equal(document.getElementById('data-management-label').hidden,true);
-  vm.runInContext('adminUnlocked=true;usingLocalData=true',viewer);
-  await vm.runInContext('publishSharedData()',viewer);
-  assert.equal(sharedWrites,1);
-  assert.equal(vm.runInContext('usingLocalData',viewer),true);
-  assert(document.getElementById('data-status').textContent.includes('permissão'));
-  console.log('Hosted import → automatic shared save → second visitor read passed; client-side privilege tampering rejected');
-  console.log('PASS — unit, source, actual XLSX and integrated API checks. Browser/visual checks remain unverified.');
+  await execute('handleGoogleSheetsUpdate()');
+  assert.equal(sharedWrites,0,'Reading a preview must not publish');
+  assert.equal(execute('usingLocalData'),true);
+  assert.equal(document.getElementById('data-confirm-btn').hidden,false);
+  assert(document.getElementById('data-status').textContent.includes('Prévia de 38 programas'));
+  const snapshot=execute('JSON.stringify([DIMENSIONS,MAP_EXT,EXT_COLORS,MAP_ORGS_EXTRA])');
+  const badCases=[wb=>{delete wb.Sheets.Programas.H1;},wb=>{wb.Sheets.Programas.A2.v='Não existe';},wb=>{wb.Sheets.Programas.K2.v='Chave incorreta';},wb=>{wb.Sheets['Além do mapa programático'].J2.v='cor inválida';},wb=>{delete wb.Sheets['Além do mapa programático'].G1;}];
+  for(const alter of badCases){workbook={Sheets:structuredClone(fixture.sheets)};alter(workbook);await execute('handleGoogleSheetsUpdate()');assert(document.getElementById('data-status').textContent.startsWith('Atualização cancelada:'));assert.equal(execute('JSON.stringify([DIMENSIONS,MAP_EXT,EXT_COLORS,MAP_ORGS_EXTRA])'),snapshot);assert.equal(sharedWrites,0);}
+  upstreamFailure=true;await execute('handleGoogleSheetsUpdate()');assert.equal(execute('JSON.stringify([DIMENSIONS,MAP_EXT,EXT_COLORS,MAP_ORGS_EXTRA])'),snapshot);assert.equal(sharedWrites,0);upstreamFailure=false;
+  workbook={Sheets:structuredClone(fixture.sheets)};await execute('handleGoogleSheetsUpdate()');await execute('publishSharedData()');
+  assert.equal(sharedWrites,1);assert.equal(execute('usingLocalData'),false);assert.equal(execute('sharedRevision'),'revision-1');
+  const viewer=hostedContext('viewer@example.test');await vm.runInContext('loadSharedData()',viewer);
+  assert.equal(vm.runInContext('sharedRevision',viewer),'revision-1');assert.equal(vm.runInContext('adminUnlocked',viewer),false);
+  for(const id of ['data-upload-btn','data-management-label','data-confirm-btn','data-source-link'])assert.equal(document.getElementById(id).hidden,true,id+' must stay hidden for viewers');
+  vm.runInContext('adminUnlocked=true;usingLocalData=true',viewer);await vm.runInContext('publishSharedData()',viewer);assert.equal(sharedWrites,1);assert.equal(vm.runInContext('usingLocalData',viewer),true);
+  console.log('PASS — Sheets preview, validation failures, upstream failure, explicit publication, second visitor read and authorization. Browser/visual checks remain separate.');
 })().catch(err=>{console.error(err);process.exitCode=1;});
