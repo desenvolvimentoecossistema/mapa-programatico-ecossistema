@@ -155,7 +155,7 @@ const quietConsole={...console,error:()=>{}};ctx.console=quietConsole;
     if(options.onlyIf instanceof Headers?sharedBody!==null:options.onlyIf.etagMatches!==sharedETag)return null;
     sharedBody=body;sharedETag='revision-'+(++sharedWrites);return {etag:sharedETag};
   }};
-  const env={SITE_AUTH_MODE:'sites',BUCKET:bucket,MAP_ADMIN_EMAILS:'owner@example.test',MAP_ORIGIN:origin};
+  const env={SITE_AUTH_MODE:'sites',BUCKET:bucket,MAP_ADMIN_EMAILS:'owner@example.test',MAP_ORIGIN:origin,GOOGLE_SHEETS_ID:'abcdefghijklmnopqrstuv123456'};
   function hostedContext(email){
     const hosted=vm.createContext({...ctx,AbortSignal,location:{protocol:'https:'},URL,fetch:(url,options={})=>{
       if(url==='/api/sheets/preview'){
@@ -173,10 +173,15 @@ const quietConsole={...console,error:()=>{}};ctx.console=quietConsole;
   await execute('loadSharedData()');
   assert.equal(document.getElementById('data-management-label').hidden,false);
   assert.equal(execute('adminUnlocked && sharedReady'),true);
-  await execute('handleGoogleSheetsUpdate()');
+  assert.equal(document.getElementById('data-source-link').hidden,false,'Source must be visible before reading a preview');
+  assert.equal(document.getElementById('data-source-link').href,'https://docs.google.com/spreadsheets/d/abcdefghijklmnopqrstuv123456/edit');
+  const pendingPreview=execute('handleGoogleSheetsUpdate()');
+  assert.equal(document.getElementById('data-upload-btn').hidden,true,'Hide update while reading');
+  await pendingPreview;
   assert.equal(sharedWrites,0,'Reading a preview must not publish');
   assert.equal(execute('usingLocalData'),true);
   assert.equal(document.getElementById('data-confirm-btn').hidden,false);
+  assert.equal(document.getElementById('data-upload-btn').hidden,true,'Hide update while preview is open');
   assert(document.getElementById('data-status').textContent.includes('Prévia de 38 programas'));
   const snapshot=execute('JSON.stringify([DIMENSIONS,MAP_EXT,EXT_COLORS,MAP_ORGS_EXTRA])');
   const badCases=[wb=>{delete wb.Sheets.Programas.H1;},wb=>{wb.Sheets.Programas.A2.v='Não existe';},wb=>{wb.Sheets.Programas.K2.v='Chave incorreta';},wb=>{wb.Sheets['Além do mapa programático'].J2.v='cor inválida';},wb=>{delete wb.Sheets['Além do mapa programático'].G1;}];
@@ -184,6 +189,7 @@ const quietConsole={...console,error:()=>{}};ctx.console=quietConsole;
   upstreamFailure=true;await execute('handleGoogleSheetsUpdate()');assert.equal(execute('JSON.stringify([DIMENSIONS,MAP_EXT,EXT_COLORS,MAP_ORGS_EXTRA])'),snapshot);assert.equal(sharedWrites,0);upstreamFailure=false;
   workbook={Sheets:structuredClone(fixture.sheets)};await execute('handleGoogleSheetsUpdate()');await execute('publishSharedData()');
   assert.equal(sharedWrites,1);assert.equal(execute('usingLocalData'),false);assert.equal(execute('sharedRevision'),'revision-1');
+  assert.equal(document.getElementById('data-upload-btn').hidden,false,'Restore update after publishing');
   const viewer=hostedContext('viewer@example.test');await vm.runInContext('loadSharedData()',viewer);
   assert.equal(vm.runInContext('sharedRevision',viewer),'revision-1');assert.equal(vm.runInContext('adminUnlocked',viewer),false);
   for(const id of ['data-upload-btn','data-management-label','data-confirm-btn','data-source-link'])assert.equal(document.getElementById(id).hidden,true,id+' must stay hidden for viewers');
