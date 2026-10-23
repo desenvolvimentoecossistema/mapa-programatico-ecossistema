@@ -1503,13 +1503,13 @@ const PUBLICOS = ['Estudantes', 'Professores', 'Formadores de professores', 'Red
 
 function publicoTagsFor(s) {
 
-  const parts = String(s || '').split(';').map(x => x.trim()).filter(Boolean);
+  const parts = splitList(s);
 
   return parts.length ? parts : ['Não especificado'];
 
 }
 
-function publicoDisplay(s) { return String(s || '').split(';').map(x => x.trim()).filter(Boolean).join(', '); }
+function publicoDisplay(s) { return splitList(s).join(', '); }
 
 
 
@@ -1518,6 +1518,8 @@ function publicoDisplay(s) { return String(s || '').split(';').map(x => x.trim()
 /* ================= Abas: Educação | Lideranças ================= */
 
 let activeTab = 'educacao';
+
+const SEM_NIVEL = 'Sem nível informado';
 
 const TAB_METAS = { educacao: ['Alfabetização', 'Fundamental 2'], liderancas: ['Lideranças'] };
 
@@ -1569,7 +1571,7 @@ function buildProgramEntries() {
 
         segmentos: segList(d).length ? segList(d) : ['N/A'],
 
-        niveis: d.segmento_niveis && d.segmento_niveis.length ? d.segmento_niveis : [],
+        niveis: d.segmento_niveis && d.segmento_niveis.length ? d.segmento_niveis : [SEM_NIVEL],
 
         especialidades: d.especialidades && d.especialidades.length ? d.especialidades : ['N/A'],
 
@@ -1652,10 +1654,6 @@ function groupMatch(g, e) {
   const vals = g.values(e);
 
   const arr = Array.isArray(vals) ? vals : [vals];
-
-  // programa sem valor nesta dimensão (ex.: Nível = atende todos): passa por qualquer seleção
-
-  if (g.anyIfEmpty && arr.length === 0) return !g.touched || g.state.size > 0;
 
   return arr.some(v => g.state.has(v));
 
@@ -2049,7 +2047,7 @@ function countByValue(entries, getValues) {
 
     const vals = getValues(e);
 
-    (Array.isArray(vals) ? vals : [vals]).forEach(v => { counts[v] = (counts[v]||0) + 1; });
+    new Set(Array.isArray(vals) ? vals : [vals]).forEach(v => { counts[v] = (counts[v]||0) + 1; });
 
   });
 
@@ -2057,7 +2055,7 @@ function countByValue(entries, getValues) {
 
 }
 
-const NIVEL_ORDER = ['Educação Infantil', 'Alfabetização', 'Fundamental 2', 'Ensino Médio', 'Pós-graduação'];
+const NIVEL_ORDER = ['Educação Infantil', 'Alfabetização', 'Fundamental 2', 'Ensino Médio', 'Pós-graduação', SEM_NIVEL];
 
 
 
@@ -2241,7 +2239,7 @@ function validateSnapshot(snapshot) {
 
         if (!Array.isArray(list) || list.some(x=>typeof x !== 'string')) throw new Error('Lista inválida: ' + field + '.');
 
-        clean[field] = [...new Set(list)];
+        clean[field] = [...new Set(list.map(x => x.trim()).filter(Boolean))];
 
       }
 
@@ -2309,7 +2307,7 @@ let progFilterGroups = [
 
     values: e => e.orgs.map(o => ORGS[o].label) },
 
-  { key: 'niveis', label: 'Nível', openByDefault: false, anyIfEmpty: true,
+  { key: 'niveis', label: 'Nível', openByDefault: false,
 
     values: e => e.niveis },
 
@@ -2719,7 +2717,7 @@ function renderProgramsGrid() {
 
     const segs = segList(d);
 
-    const nivelList = (d.segmento_niveis && d.segmento_niveis.length) ? d.segmento_niveis : [];
+    const nivelList = activeTab === 'educacao' ? e.niveis : (d.segmento_niveis || []);
 
     const segmentoHtml = segs.length
 
