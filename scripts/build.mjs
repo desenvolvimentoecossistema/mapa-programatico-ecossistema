@@ -48,7 +48,7 @@ const login=await readFile(root+'site/login.html','utf8');
 
 const lines=[
 
-  '// Generated from site/index.html and server/handler.js by scripts/prepare-worker.mjs.',
+  '// Generated from site/index.html and server/handler.js by scripts/build.mjs.',
 
   'const PAGE='+JSON.stringify(page)+';',
 
