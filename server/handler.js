@@ -58,7 +58,7 @@ export default {
       return json({error:'O login está temporariamente indisponível. Tente novamente.'},503);
     }
     if(authentication)return authentication;
-    if(!['/','/api/session','/api/data'].includes(pathname))return new Response('Não encontrado',{status:404});
+    if(!['/','/api/session','/api/data','/api/sheets/preview'].includes(pathname))return new Response('Não encontrado',{status:404});
     let user;
     try{user=await sessionUser(request,env);}catch{return json({error:'Não foi possível verificar a sessão. Tente novamente.'},503);}
     if(!user){
@@ -66,6 +66,14 @@ export default {
       return json({error:'Entre com sua conta institucional para acessar o mapa.'},401);
     }
     if(pathname==='/api/session'&&request.method==='GET')return json({canEdit:canEdit(user,env)});
+    if(pathname==='/api/sheets/preview'){
+      if(!canEdit(user,env))return json({error:'Sua conta não tem permissão para atualizar o mapa.'},403);
+      if(request.method!=='POST')return json({error:'Método não permitido.'},405);
+      const expected=env.MAP_ORIGIN||new URL(request.url).origin;
+      if(request.headers.get('origin')!==expected||request.headers.get('sec-fetch-site')==='cross-site')return json({error:'Origem da solicitação não permitida.'},403);
+      try{return json(await readGoogleSheets(env));}
+      catch(error){return json({error:error.status?error.message:'Não foi possível ler a fonte do Google Sheets. Os dados publicados foram preservados.'},error.status||503);}
+    }
     if(pathname==='/api/data')return handleData(request,env,user);
     if(pathname!=='/'||!['GET','HEAD'].includes(request.method))return new Response('Não encontrado',{status:404});
     return new Response(request.method==='HEAD'?null:PAGE,{headers:{
