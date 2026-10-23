@@ -82,6 +82,35 @@ console.log('Programs by tab:',run('JSON.stringify({educacao:tabCount("educacao"
 
 assert.equal(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).length'),run('tabCount("educacao")'));
 
+// Reproduce the reported selection through the same checkbox change handlers as the UI.
+const filterPanel=document.getElementById('programs-filters');
+const chooseOnly=(key,value)=>{
+  document.getElementById('programs-reset').click();
+  const checkbox=filterPanel.querySelectorAll('input').find(el=>el.dataset.focusKey===JSON.stringify([key,value]));
+  assert(checkbox,'Missing filter option '+key+': '+value);
+  checkbox.checked=true;checkbox.events.change[0]();
+};
+chooseOnly('niveis','Alfabetização');
+assert.equal(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).length'),13);
+assert(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).every(e=>e.d.segmento_niveis.includes("Alfabetização"))'));
+assert(!document.getElementById('programs-grid').innerHTML.includes('<h3>Conectividade</h3>'));
+chooseOnly('niveis','Sem nível informado');
+assert.equal(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).length'),7);
+assert(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).every(e=>e.d.segmento_niveis.length===0)'));
+assert(document.getElementById('programs-grid').innerHTML.includes('Sem nível informado'));
+chooseOnly('org','MegaEdu');
+assert.equal(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).length'),2);
+assert(run('progGroup("niveis").state.has(SEM_NIVEL)'));
+document.getElementById('programs-select-all').click();
+assert.equal(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).length'),27);
+document.getElementById('programs-reset').click();
+assert.equal(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).length'),0);
+document.getElementById('programs-select-all').click();
+assert.deepEqual(JSON.parse(run('JSON.stringify(countByValue([{v:["Professores","Professores"]}],e=>e.v))')),{Professores:1});
+assert.deepEqual(JSON.parse(run('JSON.stringify(publicoTagsFor("Professores; Professores; Estudantes"))')),['Professores','Estudantes']);
+assert.equal(run('publicoDisplay("Professores; Professores")'),'Professores');
+console.log('Reported level filter, missing levels, clear/restore and distinct program counts passed');
+
 assert.equal(run('Object.values(DIMENSIONS).flatMap(o=>Object.values(o)).flatMap(d=>validateEstrategias(d.estrategias).invalid).length'),0);
 
 assert.equal(run('Object.values(MAP_HOTSPOTS).flat().filter(h=>!STRAT_CATALOG[h.k]).length'),0);
@@ -89,6 +118,17 @@ assert.equal(run('Object.values(MAP_HOTSPOTS).flat().filter(h=>!STRAT_CATALOG[h.
 for (const tab of ['educacao','liderancas']) {
 
   run(`switchTab('${tab}'); clearKw();`);
+
+  // Each facet count must count programs, and selecting one value must return exactly those programs.
+  const facets=JSON.parse(run('JSON.stringify(progFilterGroups.filter(g=>!g.hidden).map(g=>({key:g.key,options:g.options.map(o=>({value:o.value,count:o.count}))})))'));
+  for(const facet of facets)for(const option of facet.options){
+    ctx.facetKey=facet.key;ctx.facetValue=option.value;
+    run('progFilterGroups.forEach(initGroup);syncStrategyGroup();(()=>{const g=progGroup(facetKey);g.state=new Set([facetValue]);g.touched=true;})();autoFillUntouched(progFilterGroups,progEntries);syncStrategyGroup();');
+    assert.equal(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).length'),option.count,tab+' / '+facet.key+' / '+option.value);
+    assert(run('progEntries.filter(e=>entryMatchesFilters(e,progFilterGroups)).every(e=>progGroup(facetKey).values(e).includes(facetValue))'),tab+' must not match an unrelated facet');
+  }
+  run('progFilterGroups.forEach(initGroup);syncStrategyGroup();');
+  console.log('All individual facet counts passed:',tab,facets.reduce((n,g)=>n+g.options.length,0));
 
   const keys=run(`Object.keys(STRAT_CATALOG).filter(k=>progEntries.some(e=>e.estrKeys.includes(k)))`);
 
@@ -177,6 +217,8 @@ assert.throws(()=>run('rowsToDimensions([{...rows[0],"Organização":"não exist
 assert.throws(()=>run('validateSnapshot({dims:{abc:{Incompleto:{}}}})'),/Campo inválido/);
 
 assert.throws(()=>run('validateSnapshot({dims:{}})'),/Nenhum programa/);
+
+assert.deepEqual(JSON.parse(run('JSON.stringify(validateSnapshot({dims:{abc:{Normalized:{...DIMENSIONS.abc[Object.keys(DIMENSIONS.abc)[0]],segmento_niveis:[" Alfabetização ","Alfabetização"," "]}}}}).dims.abc.Normalized.segmento_niveis)')),['Alfabetização']);
 
 assert.equal(run('safeDescription("A &amp; B\\n<strong>x</strong>")'),'A &amp; B<br><strong>x</strong>');
 
