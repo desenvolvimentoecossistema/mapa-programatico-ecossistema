@@ -1,9 +1,26 @@
 {
+
   "name": "mapa-programatico-ecossistema",
+
   "private": true,
+
   "type": "module",
+
+  "engines": {
+
+    "node": ">=24.13.0 <25"
+
+  },
+
   "scripts": {
+
     "build": "node scripts/build.mjs",
-    "validate": "node scripts/validate-artifact.mjs"
+
+    "start": "node --env-file-if-exists=.env server/node.mjs",
+
+    "test": "node --test tests/runtime.test.mjs && node tests/google-auth.mjs && node tests/google-sheets.mjs && node tests/sso.mjs && node tests/audit.cjs"
+
   }
+
 }
+
