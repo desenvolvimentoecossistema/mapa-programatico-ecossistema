@@ -65,7 +65,11 @@ export default {
       if(pathname==='/')return redirect('/login');
       return json({error:'Entre com sua conta institucional para acessar o mapa.'},401);
     }
-    if(pathname==='/api/session'&&request.method==='GET')return json({canEdit:canEdit(user,env)});
+    if(pathname==='/api/session'&&request.method==='GET'){
+      const editor=canEdit(user,env);
+      const sourceUrl=editor&&/^[A-Za-z0-9_-]{20,150}$/.test(env.GOOGLE_SHEETS_ID||'')?'https://docs.google.com/spreadsheets/d/'+env.GOOGLE_SHEETS_ID+'/edit':null;
+      return json({canEdit:editor,sourceUrl});
+    }
     if(pathname==='/api/sheets/preview'){
       if(!canEdit(user,env))return json({error:'Sua conta não tem permissão para atualizar o mapa.'},403);
       if(request.method!=='POST')return json({error:'Método não permitido.'},405);
