@@ -234,6 +234,12 @@
 
   .filters-actions button:hover { border-color: var(--ink-soft); }
 
+  .filters-heading { display: contents; }
+
+  .filters-content { display:flex; flex-direction:column; gap:14px; }
+
+  .mobile-filter-toggle, .mobile-filter-results { display:none; }
+
 
 
   .result-count {
@@ -614,7 +620,33 @@
 
     .app { grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr); }
 
-    .sidebar { padding:14px; max-height:40dvh; gap:10px; border-bottom:1px solid var(--line); }
+    .sidebar { padding:10px 12px; gap:10px; border-bottom:1px solid var(--line); overflow:hidden; }
+
+    .sidebar .title-block { display:none; }
+
+    .filters-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-shrink:0; }
+
+    .filters-heading .result-count { border:0; background:transparent; padding:0; font-size:12px; }
+
+    .mobile-filter-toggle, .mobile-filter-results { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:44px; padding:10px 14px; border:1px solid #052B48; border-radius:8px; background:#fff; color:#052B48; font-size:14px; font-weight:700; cursor:pointer; flex-shrink:0; }
+
+    .mobile-filter-toggle svg { width:18px; height:18px; }
+
+    .filters-content, .mobile-filter-results { display:none; }
+
+    .app.mobile-filters-open { grid-template-rows:minmax(0,1fr); }
+
+    .mobile-filters-open .sidebar { min-height:0; }
+
+    .mobile-filters-open .filters-content { display:flex; flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:2px 3px 10px; gap:10px; }
+
+    .mobile-filters-open .mobile-filter-results { display:flex; width:100%; background:#052B48; color:#fff; margin-top:auto; }
+
+    .mobile-filters-open .programs-wrap { display:none; }
+
+    .filters-actions button, .filter-opt { min-height:44px; }
+
+    .filter-group summary { min-height:44px; }
 
     .programs-wrap { padding:16px 14px; }
 
@@ -743,7 +775,7 @@
 
 <div class="l2-view active" id="l2-view-programas">
 
-  <div class="app">
+  <div class="app" id="programs-app">
 
     <aside class="sidebar">
 
@@ -755,7 +787,21 @@
 
       </div>
 
-      <div class="result-count" id="programs-result-count" role="status" aria-live="polite"></div>
+      <div class="filters-heading">
+
+        <div class="result-count" id="programs-result-count" role="status" aria-live="polite"></div>
+
+        <button type="button" class="mobile-filter-toggle" id="mobile-filter-toggle" aria-expanded="false" aria-controls="filters-content">
+
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+
+          <span id="mobile-filter-label">Filtros</span>
+
+        </button>
+
+      </div>
+
+      <div class="filters-content" id="filters-content">
 
       <div class="kw-search"><input aria-label="Buscar programas por palavra-chave" type="search" id="kw-input" placeholder="Buscar por palavra-chave" autocomplete="off"></div>
 
@@ -768,6 +814,10 @@
       </div>
 
       <div id="programs-filters"></div>
+
+      </div>
+
+      <button type="button" class="mobile-filter-results" id="mobile-filter-results">Ver programas</button>
 
     </aside>
 
@@ -2471,6 +2521,8 @@ function syncViewSwitch() {
 
 function setView(v) {
 
+  setMobileFiltersOpen(false);
+
   if (v !== 'programas' && (!Object.hasOwn(VIEW_TAB, v) || VIEW_TAB[v] !== activeTab)) v = 'programas';
 
   activeView = v;
@@ -2659,6 +2711,8 @@ function renderProgramsGrid() {
 
   document.getElementById('programs-result-count').innerHTML = `<b>${filtered.length}</b> de ${progEntries.length} programas exibidos`;
 
+  document.getElementById('mobile-filter-results').textContent = `Ver ${filtered.length} ${filtered.length === 1 ? 'programa' : 'programas'}`;
+
 
 
   if (filtered.length === 0) {
@@ -2770,6 +2824,34 @@ function renderProgramsGrid() {
 }
 
 
+
+function setMobileFiltersOpen(open, returnFocus = false) {
+
+  document.getElementById('programs-app').classList.toggle('mobile-filters-open', open);
+
+  document.getElementById('mobile-filter-toggle').setAttribute('aria-expanded', String(open));
+
+  document.getElementById('mobile-filter-label').textContent = open ? 'Fechar filtros' : 'Filtros';
+
+  if (returnFocus) document.getElementById('mobile-filter-toggle').focus();
+
+}
+
+document.getElementById('mobile-filter-toggle').addEventListener('click', () => {
+
+  const open = document.getElementById('mobile-filter-toggle').getAttribute('aria-expanded') !== 'true';
+
+  setMobileFiltersOpen(open);
+
+});
+
+document.getElementById('mobile-filter-results').addEventListener('click', () => setMobileFiltersOpen(false, true));
+
+document.addEventListener('keydown', ev => {
+
+  if (ev.key === 'Escape' && document.getElementById('programs-app').classList.contains('mobile-filters-open')) setMobileFiltersOpen(false, true);
+
+});
 
 buildFilterUI(document.getElementById('programs-filters'), progFilterGroups, progEntries, renderProgramsGrid);
 
