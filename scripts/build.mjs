@@ -3,6 +3,7 @@ import {readFile,writeFile,mkdir} from 'node:fs/promises';
 import vm from 'node:vm';
 
 import {fileURLToPath} from 'node:url';
+import {pageAssets} from './page-assets.mjs';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
 
@@ -45,12 +46,14 @@ const verifier=await readFile(root+'server/google-token.js','utf8');
 const sheets=await readFile(root+'server/google-sheets.js','utf8');
 
 const login=await readFile(root+'site/login.html','utf8');
+const resources=pageAssets(page);
 
 const lines=[
 
   '// Generated from site/index.html and server/handler.js by scripts/build.mjs.',
 
-  'const PAGE='+JSON.stringify(page)+';',
+  'const PAGE='+JSON.stringify(resources.page)+';',
+  'const STATIC_ASSETS='+JSON.stringify(resources.assets)+';',
 
   'const ORGS='+JSON.stringify(model.ORGS)+';',
 
